@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(poetry remove:*)",
+      "Bash(poetry add:*)",
+      "Bash(where:*)",
+      "Bash(cmd /c \"poetry --version\")",
+      "Bash(cmd /c:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(poetry run alembic revision:*)"
+    ]
+  }
+}

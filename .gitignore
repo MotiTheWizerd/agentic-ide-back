@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Database
+*.db
+
+# Alembic
+alembic/versions/__pycache__/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Poetry
+poetry.lock
