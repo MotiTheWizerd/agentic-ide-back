@@ -2,33 +2,29 @@
 
 ## What was done
 
-### 1. Project Setup
-- Added **fastapi** and **uvicorn** to pyproject.toml (kept google-adk for future use)
-- Created `.gitignore` tailored for Python
+### 1. Projects Module
+- Created `Project` SQLAlchemy model: id (auto), project_name, user_id (FK → users), created_at
+- Created Pydantic schemas: `ProjectCreate`, `ProjectResponse`
+- Created `ProjectManager` business logic with event bus integration
+- Created `get_project_manager` DI dependency
+- Added CRUD endpoints: `POST/GET/DELETE /api/v1/projects`
+- Registered Project model in `app/models/__init__.py` and `alembic/env.py`
+- Generated and applied Alembic migration for projects table
+- Wired projects router into v1 aggregator
 
-### 2. FastAPI Application
-- Created `app/main.py` with lifespan (startup/shutdown) and app factory pattern
-- Set up `api/v1/` routing structure with health endpoint
+### 2. Authentication (JWT + Refresh Tokens)
+- Extended `security.py` with JWT functions: `create_access_token()`, `create_refresh_token()`, `decode_token()`
+- Access token: 30 min expiry, Refresh token: 7 day expiry
+- Created auth schemas: `LoginRequest`, `TokenResponse` (includes user details), `RefreshRequest`
+- Created `POST /api/v1/auth/login` — email + password → tokens + user
+- Created `POST /api/v1/auth/refresh` — refresh token → new token pair + user
+- Created `get_current_user` dependency in `app/core/auth.py` (Bearer token extraction)
+- Added `python-jose[cryptography]` to dependencies
 
-### 3. Core Layer (`app/core/`)
-- **events/** - Pydantic `Event` base model with id, type, timestamp, payload
-- **bus/** - Async `EventBus` with on/off/emit, safe error handling per handler
-- **logger/** - `setup_logging()` with stdout formatter, called at startup
-- **db/** - Async SQLAlchemy engine, session maker, `Base`, and `get_db` dependency
-- **security.py** - bcrypt `hash_password()` and `verify_password()`
+### 3. CORS Middleware
+- Added `CORSMiddleware` to `app/main.py` with `allow_origins=["*"]` (to be locked down for production)
+- Fixed browser preflight `OPTIONS` 405 errors
 
-### 4. Models (`app/models/`)
-- `User` model: id, username, email, hashed_password, created_at
-
-### 5. Modules (`app/modules/`)
-- `UserManager` - business logic layer, emits events via event bus (separate from DB/model layer)
-
-### 6. API Endpoints (`app/api/v1/`)
-- `POST /api/v1/users` - create user (with password hashing)
-- `GET /api/v1/users/{id}` - get user by ID
-- `DELETE /api/v1/users/{id}` - delete user
-- Pydantic schemas: `UserCreate` (with password), `UserResponse` (without password)
-
-### 7. Alembic
-- Configured async-compatible alembic setup (env.py, alembic.ini, script template)
-- Initial migration: create users table with hashed_password column
+### 4. Login Response Enhancement
+- Added `user` field to `TokenResponse` schema (reuses `UserResponse`)
+- Both login and refresh endpoints now return user details alongside tokens
