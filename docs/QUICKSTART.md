@@ -17,7 +17,7 @@ poetry install
 Create a `.env` file in the project root:
 
 ```env
-DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/agentic-ide
+DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/agentic-ai-db
 AUTH_SECRET_KEY=secret-me
 PORT=8000
 ```
@@ -42,7 +42,8 @@ app/
 │       │   ├── auth.py              # POST /auth/login, POST /auth/refresh
 │       │   ├── backoffice_auth.py   # POST /auth/backoffice/create, POST /auth/backoffice/login
 │       │   ├── users.py             # POST/GET/DELETE /api/v1/users
-│       │   └── projects.py          # POST/POST-select/GET/DELETE /api/v1/projects
+│       │   ├── projects.py          # POST/POST-select/GET/DELETE /api/v1/projects
+│       │   └── ws.py                # WebSocket /api/v1/ws — global real-time tunnel
 │       └── schemas/
 │           ├── auth.py              # LoginRequest, TokenResponse, RefreshRequest
 │           ├── backoffice_auth.py   # BackofficeLoginRequest, BackofficeTokenResponse, BackofficeUserCreate, BackofficeUserResponse
@@ -63,6 +64,9 @@ app/
 │   │   └── subscribe.py             # @subscribe decorator for event handlers
 │   ├── bus/
 │   │   └── event_bus.py             # Async event bus (on/off/emit) + auto-persist to event_logs
+│   ├── ws/
+│   │   ├── models.py                # WSMessage pydantic model (type + data envelope)
+│   │   └── manager.py              # ConnectionManager — track connections, send_to_user, broadcast
 │   └── logger/
 │       └── setup.py                 # Logging configuration
 ├── models/
@@ -185,6 +189,46 @@ async def on_project_created(event: Event) -> None:
 
 Every emitted event is automatically persisted to the `event_logs` table.
 
+## WebSocket Tunnel
+
+Global persistent WebSocket connection for all real-time communication.
+
+### Connection
+
+```
+ws://localhost:8000/api/v1/ws?token=<JWT_ACCESS_TOKEN>
+```
+
+- One connection per client session
+- JWT passed as query param (validated on connect, rejected with 4001 if invalid)
+- Auto-reconnect is the client's responsibility
+
+### Message Envelope (both directions)
+
+```json
+{ "type": "domain.action", "data": { ... } }
+```
+
+### Current Messages
+
+| Direction | type | data | Description |
+|-----------|------|------|-------------|
+| Server → Client | `connection.ready` | `{ "user_id": int }` | Sent after successful auth |
+| Client → Server | `ping` | `{}` | Keep-alive |
+| Server → Client | `pong` | `{}` | Keep-alive response |
+
+### Sending from anywhere in the backend
+
+```python
+from app.core.ws import ws_manager, WSMessage
+
+# Send to a specific user
+await ws_manager.send_to_user(user_id, WSMessage(type="some.event", data={...}))
+
+# Broadcast to all connected clients
+await ws_manager.broadcast(WSMessage(type="system.notification", data={...}))
+```
+
 ## API Endpoints
 
 | Method   | Path                              | Auth     | Description                                  |
@@ -201,6 +245,7 @@ Every emitted event is automatically persisted to the `event_logs` table.
 | `POST`   | `/api/v1/projects/select`        | No       | Get projects by user_id                      |
 | `GET`    | `/api/v1/projects/{id}`          | No       | Get project by ID                            |
 | `DELETE` | `/api/v1/projects/{id}`          | No       | Delete project                               |
+| `WS`     | `/api/v1/ws?token=<JWT>`         | Yes      | WebSocket global tunnel                      |
 
 ## Authentication
 
