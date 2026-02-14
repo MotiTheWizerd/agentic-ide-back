@@ -10,7 +10,9 @@
       "Bash(poetry run alembic revision:*)",
       "Bash(python -m alembic revision:*)",
       "Bash(python -m alembic upgrade:*)",
-      "Bash(python -m scripts.seed_components:*)"
+      "Bash(python -m scripts.seed_components:*)",
+      "Bash(poetry run python:*)",
+      "Bash(taskkill:*)"
     ]
   }
 }

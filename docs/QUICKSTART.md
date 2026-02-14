@@ -4,11 +4,22 @@
 
 - Python 3.11+
 - Poetry
+- PostgreSQL
 
 ## Install
 
 ```bash
 poetry install
+```
+
+## Environment
+
+Create a `.env` file in the project root:
+
+```env
+DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/agentic-ide
+AUTH_SECRET_KEY=secret-me
+PORT=8000
 ```
 
 ## Run
@@ -23,11 +34,11 @@ Swagger UI: http://localhost:8000/docs
 
 ```
 app/
-├── main.py                          # FastAPI app + lifespan + CORS
+├── main.py                          # FastAPI app + lifespan + CORS + boot sequence
 ├── api/
 │   └── v1/
-│       ├── router.py                # v1 router aggregator
-│       ├── endpoints/
+│       ├── router.py                # v1 router (auto-discovers all endpoint routers)
+│       ├── endpoints/               # Drop a file here → auto-discovered
 │       │   ├── auth.py              # POST /auth/login, POST /auth/refresh
 │       │   ├── backoffice_auth.py   # POST /auth/backoffice/create, POST /auth/backoffice/login
 │       │   ├── users.py             # POST/GET/DELETE /api/v1/users
@@ -41,12 +52,17 @@ app/
 │   ├── security.py                  # bcrypt hashing + JWT token create/decode
 │   ├── auth.py                      # get_current_user dependency (Bearer token)
 │   ├── db/
-│   │   ├── base.py                  # SQLAlchemy async engine + Base
+│   │   ├── base.py                  # SQLAlchemy async engine + Base (reads DATABASE_URL from .env)
 │   │   └── dependency.py            # get_db FastAPI dependency
+│   ├── di/
+│   │   ├── registry.py              # ServiceRegistry — singleton DI container
+│   │   └── discovery.py             # Auto-discovery: routers, managers, event handlers
 │   ├── events/
-│   │   └── base.py                  # Event base model (pydantic)
+│   │   ├── base.py                  # Event base model (pydantic)
+│   │   ├── types.py                 # EventTypes — single source of truth for all event names
+│   │   └── subscribe.py             # @subscribe decorator for event handlers
 │   ├── bus/
-│   │   └── event_bus.py             # Async event bus (on/off/emit)
+│   │   └── event_bus.py             # Async event bus (on/off/emit) + auto-persist to event_logs
 │   └── logger/
 │       └── setup.py                 # Logging configuration
 ├── models/
@@ -59,20 +75,45 @@ app/
 │   ├── component_api_config.py      # ComponentApiConfig model (execution/API mapping)
 │   ├── component_output_schema.py   # ComponentOutputSchema model (what each node produces)
 │   ├── flow.py                      # Flow model (user pipelines with graph_data JSON)
-│   └── consistent_character.py      # ConsistentCharacter model (persona data)
-└── modules/
+│   ├── consistent_character.py      # ConsistentCharacter model (persona data)
+│   └── event_log.py                 # EventLog model (persisted event audit trail)
+└── modules/                         # Drop a module here → manager + handlers auto-discovered
     ├── users/
-    │   └── manager.py               # User business logic
+    │   ├── manager.py               # User business logic
+    │   └── handlers.py              # @subscribe handlers for user events
     └── projects/
         ├── manager.py               # Project business logic
-        └── dependency.py            # get_project_manager DI
+        └── handlers.py              # @subscribe handlers for project events
 scripts/
 └── seed_components.py               # Seed script for all 13 component types + related data
 ```
 
+## Boot Sequence
+
+On startup, the app automatically:
+1. Configures logging
+2. Auto-discovers routers from `app/api/v1/endpoints/`
+3. Auto-discovers and registers managers from `app/modules/*/manager.py` as singletons
+4. Auto-discovers and subscribes event handlers from `app/modules/*/handlers.py`
+
+## Adding a New Module (Zero Wiring)
+
+1. Create `app/api/v1/endpoints/flows.py` with `router = APIRouter(prefix="/flows", tags=["flows"])` — auto-discovered
+2. Create `app/modules/flows/manager.py` with `class FlowManager` — auto-registered as singleton
+3. Create `app/modules/flows/handlers.py` with `@subscribe` handlers — auto-subscribed
+4. Done. No manual imports or registration needed.
+
+To use a manager in an endpoint:
+```python
+from app.core.di import registry
+from app.modules.flows.manager import FlowManager
+
+manager: FlowManager = Depends(registry.get(FlowManager))
+```
+
 ## Database
 
-SQLite (async via aiosqlite). DB file: `app.db`
+PostgreSQL (async via asyncpg). Connection string read from `.env`.
 
 ### Migrations
 
@@ -118,6 +159,32 @@ python -m scripts.seed_components
 | `flows` | UUID | User pipelines — graph_data JSON holds nodes + edges + viewport (FK → users, projects) |
 | `consistent_characters` | UUID | Reusable character personas (FK → users, projects) |
 
+### Event Tables
+
+| Table | PK | Description |
+|-------|-----|-------------|
+| `event_logs` | UUID | Persisted event audit trail (event_name, payload JSON, user_id FK, project_id FK nullable, session_id nullable) |
+
+## Event System
+
+Events use typed constants and auto-discovered handlers:
+
+```python
+# Define event type (app/core/events/types.py)
+class EventTypes:
+    PROJECT_CREATED = "project.created"
+
+# Emit from a manager
+await event_bus.emit(Event(type=EventTypes.PROJECT_CREATED, payload={...}))
+
+# Handle with @subscribe (app/modules/projects/handlers.py)
+@subscribe(EventTypes.PROJECT_CREATED)
+async def on_project_created(event: Event) -> None:
+    ...
+```
+
+Every emitted event is automatically persisted to the `event_logs` table.
+
 ## API Endpoints
 
 | Method   | Path                              | Auth     | Description                                  |
@@ -147,8 +214,9 @@ JWT-based with refresh tokens:
 
 - **fastapi** - Web framework
 - **uvicorn** - ASGI server
-- **sqlalchemy + aiosqlite** - Async ORM + SQLite driver
+- **sqlalchemy + asyncpg** - Async ORM + PostgreSQL driver
 - **alembic** - Database migrations
 - **bcrypt** - Password hashing
 - **python-jose[cryptography]** - JWT tokens
+- **python-dotenv** - Environment variable loading
 - **google-adk** - Google ADK (reserved for future use)

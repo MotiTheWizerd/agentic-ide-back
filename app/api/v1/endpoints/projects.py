@@ -5,9 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db.dependency import get_db
+from app.core.di import registry
 from app.models.project import Project
 from app.api.v1.schemas.project import ProjectCreate, ProjectResponse, ProjectSelectByUser
-from app.modules.projects.dependency import get_project_manager
 from app.modules.projects.manager import ProjectManager
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
-    manager: ProjectManager = Depends(get_project_manager),
+    manager: ProjectManager = Depends(registry.get(ProjectManager)),
 ):
     project = Project(
         project_name=body.project_name,
@@ -48,7 +48,7 @@ async def get_project(project_id: int, db: AsyncSession = Depends(get_db)):
 async def delete_project(
     project_id: int,
     db: AsyncSession = Depends(get_db),
-    manager: ProjectManager = Depends(get_project_manager),
+    manager: ProjectManager = Depends(registry.get(ProjectManager)),
 ):
     project = await db.get(Project, project_id)
     if not project:

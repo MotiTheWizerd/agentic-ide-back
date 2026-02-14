@@ -8,6 +8,7 @@ from app.models.component_api_config import ComponentApiConfig
 from app.models.component_output_schema import ComponentOutputSchema
 from app.models.flow import Flow
 from app.models.consistent_character import ConsistentCharacter
+from app.models.event_log import EventLog
 
 __all__ = [
     "User",
@@ -20,4 +21,5 @@ __all__ = [
     "ComponentOutputSchema",
     "Flow",
     "ConsistentCharacter",
+    "EventLog",
 ]

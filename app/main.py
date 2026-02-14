@@ -4,12 +4,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import router as v1_router
+from app.core.di.discovery import discover_handlers, discover_managers
 from app.core.logger import setup_logging
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    discover_managers("app.modules")
+    discover_handlers("app.modules")
     yield
 
 

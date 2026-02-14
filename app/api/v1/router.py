@@ -1,12 +1,11 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import users, projects, auth, backoffice_auth
+from app.core.di.discovery import discover_routers
 
 router = APIRouter(prefix="/api/v1")
-router.include_router(auth.router)
-router.include_router(backoffice_auth.router)
-router.include_router(users.router)
-router.include_router(projects.router)
+
+for _r in discover_routers("app.api.v1.endpoints"):
+    router.include_router(_r)
 
 
 @router.get("/health")

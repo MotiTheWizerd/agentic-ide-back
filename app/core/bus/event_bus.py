@@ -22,12 +22,32 @@ class EventBus:
         self._handlers[event_type].remove(handler)
 
     async def emit(self, event: Event) -> None:
+        asyncio.create_task(self._persist(event))
+
         handlers = self._handlers.get(event.type, [])
         if not handlers:
             return
         logger.debug("Emitting '%s' to %d handler(s)", event.type, len(handlers))
         for handler in handlers:
             asyncio.create_task(self._safe_call(handler, event))
+
+    async def _persist(self, event: Event) -> None:
+        try:
+            from app.core.db.base import async_session
+            from app.models.event_log import EventLog
+
+            async with async_session() as db:
+                log = EventLog(
+                    event_name=event.type,
+                    payload=event.payload,
+                    user_id=event.payload.get("user_id"),
+                    project_id=event.payload.get("project_id"),
+                    session_id=event.payload.get("session_id"),
+                )
+                db.add(log)
+                await db.commit()
+        except Exception:
+            logger.exception("Failed to persist event %s", event.type)
 
     async def _safe_call(self, handler: EventHandler, event: Event) -> None:
         try:

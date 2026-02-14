@@ -1,49 +1,64 @@
-# Session Summary — 2026-02-14 (Session 2)
+# Session Summary — 2026-02-14 (Session 3)
 
 ## What was done
 
-### 1. Agentic Components Table
-- Created `agentic_components` table with UUID PK, unique `type`, `name`, `description`, category/provider_type enums, icon, color, LLM settings, version, is_active, created_at, updated_at
-- Created `AgenticComponent` SQLAlchemy model with `ComponentCategory` and `ProviderType` string enums
-- Generated and applied Alembic migration
+### 1. Auto-Discovery DI System
+- Created `app/core/di/registry.py` — `ServiceRegistry` singleton container with `register()`, `resolve()`, `get()` (Depends-compatible)
+- Created `app/core/di/discovery.py` — auto-discovery engine with `discover_routers()`, `discover_managers()`, `discover_handlers()`
+- Created `app/core/di/__init__.py` — clean export of `registry`
+- **Routers**: `app/api/v1/router.py` no longer manually imports endpoints — all routers in `app/api/v1/endpoints/` are auto-discovered via `pkgutil`
+- **Managers**: all `*Manager` classes in `app/modules/*/manager.py` are auto-instantiated as singletons and registered on boot
+- Deleted `app/modules/projects/dependency.py` — no longer needed
+- Removed module-level singleton instances from manager files
+- Updated `app/api/v1/endpoints/projects.py` to use `registry.get(ProjectManager)` instead of manual factory
 
-### 2. Component Sub-Tables (4 tables)
-- **`component_fields`** — configurable fields per component (field_key, label, field_type enum, placeholder, default_value, required, options JSON, validation JSON, sort_order)
-- **`component_ports`** — input/output handles (direction enum in/out, port_type enum text/adapter, handle_id, max_connections, is_dynamic, max_dynamic, sort_order)
-- **`component_api_config`** — execution/API mapping (api_route, request_mapping JSON, response_mapping JSON, pass_through_condition JSON, compression_threshold, executor_type enum)
-- **`component_output_schema`** — what each node produces (output_key, output_type enum, source DSL string)
-- All use UUID PKs with FK → agentic_components
-- Generated and applied single Alembic migration for all 4 tables
+### 2. Event System Overhaul
+- Created `app/core/events/types.py` — `EventTypes` class as single source of truth for all event type constants
+- Created `app/core/events/subscribe.py` — `@subscribe` decorator to mark async functions as event handlers
+- Updated `app/core/events/__init__.py` to export `Event`, `EventTypes`, `subscribe`
+- Added `discover_handlers()` to auto-discovery engine — scans `app/modules/*/handlers.py` for `@subscribe`-decorated functions and registers them on the event bus
+- Created `app/modules/projects/handlers.py` — handlers for `project.created`, `project.deleted`
+- Created `app/modules/users/handlers.py` — handlers for `user.registered`, `user.deactivated`
+- Updated both managers to use `EventTypes` constants instead of magic strings
+- All handlers auto-discovered and subscribed on boot
 
-### 3. Flows Table
-- Created `flows` table: UUID PK, name, user_id (int FK → users), project_id (int FK → projects, nullable), graph_data JSON, created_at, updated_at
-- Stores serialized nodes + edges + viewport as a single JSON blob
+### 3. Event Logging (Persistence)
+- Created `app/models/event_log.py` — `EventLog` model (UUID PK, event_name, payload JSON, user_id FK, project_id FK nullable, session_id nullable, created_at)
+- Updated `app/core/bus/event_bus.py` — every `emit()` now auto-persists to `event_logs` table via fire-and-forget background task
+- Registered `EventLog` in `app/models/__init__.py`
 
-### 4. Consistent Characters Table
-- Created `consistent_characters` table: UUID PK, user_id (int FK → users), project_id (int FK → projects, nullable), name, description (TEXT), image_path (nullable), created_at, updated_at
+### 4. PostgreSQL Migration
+- Switched from SQLite to PostgreSQL (`postgresql+asyncpg://`)
+- Updated `app/core/db/base.py` to read `DATABASE_URL` from `.env` via `python-dotenv`
+- Updated `alembic/env.py` to use the same `.env`-driven URL + added `EventLog` to model imports
+- Deleted all old SQLite migration files
+- Generated fresh single migration for all 11 tables against PostgreSQL
+- Added `asyncpg` and `python-dotenv` to dependencies
 
-### 5. Seed Script — All 13 Component Types
-- Created `scripts/seed_components.py` — idempotent seed script
-- Seeds 13 component types: initialPrompt, promptEnhancer, translator, storyTeller, grammarFix, compressor, imageDescriber, imageGenerator, personasReplacer, textOutput, consistentCharacter, sceneBuilder, group
-- Seeds all related data: 23 fields, 23 ports, 13 API configs, 18 output schemas
-- Includes full dropdown options (28 languages, writing styles, image styles, lighting, time of day, weather, camera angles, camera lenses, moods, group colors)
-- Run with: `python -m scripts.seed_components`
+## New files created this session
+- `app/core/di/__init__.py`
+- `app/core/di/registry.py`
+- `app/core/di/discovery.py`
+- `app/core/events/types.py`
+- `app/core/events/subscribe.py`
+- `app/modules/projects/handlers.py`
+- `app/modules/users/handlers.py`
+- `app/models/event_log.py`
 
-### 6. Cleanup
-- Cleared all data from the `projects` table
+## Files deleted this session
+- `app/modules/projects/dependency.py`
+- All old SQLite migrations in `alembic/versions/`
 
-## New models added this session
-- `app/models/agentic_component.py` — AgenticComponent
-- `app/models/component_field.py` — ComponentField
-- `app/models/component_port.py` — ComponentPort
-- `app/models/component_api_config.py` — ComponentApiConfig
-- `app/models/component_output_schema.py` — ComponentOutputSchema
-- `app/models/flow.py` — Flow
-- `app/models/consistent_character.py` — ConsistentCharacter
+## Boot sequence (what happens on startup)
+1. Logging configured
+2. Routers auto-discovered from `app/api/v1/endpoints/`
+3. Managers auto-discovered and registered as singletons from `app/modules/*/manager.py`
+4. Event handlers auto-discovered and subscribed from `app/modules/*/handlers.py`
+5. Every event emission auto-persists to `event_logs` table
 
-## Convention established
-- All endpoints use POST with JSON body — avoid GET with query/path params
-- New tables use UUID primary keys (core user/project tables remain int)
-- Enums stored as varchar strings (native_enum=False) for SQLite compatibility
-- JSON columns for flexible data (options, mappings, graph_data)
-- Component seed script is idempotent (deletes + re-inserts)
+## Conventions updated
+- Database: PostgreSQL via asyncpg (was SQLite)
+- Config: `.env` file with `python-dotenv` (was hardcoded)
+- DI: auto-discovery, no manual wiring — drop files in convention directories
+- Events: `EventTypes` constants (no magic strings), `@subscribe` decorator for handlers
+- Adding a new module = create endpoint + manager + handlers files, zero wiring needed
