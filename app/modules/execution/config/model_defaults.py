@@ -17,6 +17,7 @@ NODE_MODEL_DEFAULTS: dict[str, dict[str, str | float]] = {
     "initialPrompt":    {"provider_id": "mistral", "model": "ministral-14b-2512", "temperature": 0.7},
     "translator":       {"provider_id": "mistral", "model": "ministral-14b-2512", "temperature": 0.7},
     "storyTeller":      {"provider_id": "mistral", "model": "labs-mistral-small-creative", "temperature": 0.95},
+    "imageGenerator":   {"provider_id": "blackforestlabs", "model": "flux-kontext-pro", "temperature": 0.7},
     "imageDescriber":   {"provider_id": "claude",  "model": "", "temperature": 0.7},
     "personasReplacer": {"provider_id": "claude",  "model": "", "temperature": 0.7},
 }

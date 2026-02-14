@@ -20,6 +20,12 @@ Create a `.env` file in the project root:
 DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/agentic-ai-db
 AUTH_SECRET_KEY=secret-me
 PORT=8000
+MISTRAL_API_KEY=your-key
+GLM_API_KEY=your-key
+OPENROUTER_API_KEY=your-key
+HF_API_KEY=your-key
+ANTHROPIC_API_KEY=your-key      # Optional — only needed if using Claude provider
+FIREWORKS_API_KEY=your-key      # Required for Black Forest Labs Flux image generation
 ```
 
 ## Run
@@ -43,6 +49,7 @@ app/
 │       │   ├── backoffice_auth.py   # POST /auth/backoffice/create, POST /auth/backoffice/login
 │       │   ├── users.py             # POST/GET/DELETE /api/v1/users
 │       │   ├── projects.py          # POST/POST-select/GET/DELETE /api/v1/projects
+│       │   ├── execution.py         # POST /api/v1/execution/run — trigger graph execution
 │       │   └── ws.py                # WebSocket /api/v1/ws — global real-time tunnel
 │       └── schemas/
 │           ├── auth.py              # LoginRequest, TokenResponse, RefreshRequest
@@ -85,9 +92,40 @@ app/
     ├── users/
     │   ├── manager.py               # User business logic
     │   └── handlers.py              # @subscribe handlers for user events
-    └── projects/
-        ├── manager.py               # Project business logic
-        └── handlers.py              # @subscribe handlers for project events
+    ├── projects/
+    │   ├── manager.py               # Project business logic
+    │   └── handlers.py              # @subscribe handlers for project events
+    └── execution/                   # Graph execution engine (event-driven)
+        ├── manager.py               # ExecutionManager — entry point, fire-and-forget via asyncio.create_task
+        ├── handlers.py              # 8 @subscribe handlers → bridge events to WebSocket
+        ├── models.py                # ExecutionStep, NodeOutput, NodeExecutionContext, ResolvedModel
+        ├── runner.py                # Orchestration: topo sort → level grouping → parallel exec → event emit
+        ├── graph/
+        │   ├── topological_sort.py  # Kahn's algorithm + group_by_levels() for parallel branches
+        │   ├── edge_classification.py # Text vs adapter edge filtering
+        │   └── traversal.py         # BFS upstream/downstream
+        ├── executors/
+        │   ├── registry.py          # EXECUTORS dict: node_type → async executor function (9 registered)
+        │   ├── base.py              # ExecutorFn type alias
+        │   ├── utils.py             # merge_input_text, extract_personas, LANGUAGE_NAMES
+        │   ├── data_sources.py      # consistent_character, scene_builder
+        │   ├── text_processing.py   # initialPrompt, promptEnhancer, translator, storyTeller, grammarFix, compressor
+        │   └── output.py            # textOutput
+        ├── providers/
+        │   ├── base.py              # TextProvider protocol
+        │   ├── openai_compat.py     # AsyncOpenAI (Mistral, GLM, OpenRouter, HuggingFace)
+        │   ├── claude.py            # AsyncAnthropic
+        │   └── registry.py          # get_text_provider() lazy factory
+        ├── prompts/
+        │   ├── enhance.py           # Prompt enhancement (with/without notes)
+        │   ├── translate.py         # Translation
+        │   ├── storyteller.py       # Creative narrative (temp 0.95)
+        │   ├── grammar_fix.py       # Grammar correction (optional style)
+        │   ├── compress.py          # Text compression
+        │   └── inject_persona.py    # Character persona injection
+        └── config/
+            ├── model_defaults.py    # NODE_MODEL_DEFAULTS + resolve_model_for_node()
+            └── scene_prompts.py     # SCENE_PROMPT_BLOCKS + compose_scene_prompt()
 scripts/
 └── seed_components.py               # Seed script for all 13 component types + related data
 ```
@@ -217,6 +255,18 @@ ws://localhost:8000/api/v1/ws?token=<JWT_ACCESS_TOKEN>
 | Client → Server | `ping` | `{}` | Keep-alive |
 | Server → Client | `pong` | `{}` | Keep-alive response |
 
+### Execution Messages
+
+| Direction | type | data | Description |
+|-----------|------|------|-------------|
+| Client → Server | `execution.start` | `{ flow_id, nodes, edges, provider_id, trigger_node_id?, cached_outputs? }` | Trigger graph execution |
+| Server → Client | `execution.started` | `{ run_id }` | Run accepted |
+| Server → Client | `execution.node.status` | `{ run_id, node_id, status }` | Node pending/running/skipped |
+| Server → Client | `execution.node.completed` | `{ run_id, node_id, output }` | Node finished with output |
+| Server → Client | `execution.node.failed` | `{ run_id, node_id, error }` | Node errored |
+| Server → Client | `execution.completed` | `{ run_id, outputs }` | All nodes done |
+| Server → Client | `execution.failed` | `{ run_id, error }` | Fatal error (cycle, etc.) |
+
 ### Sending from anywhere in the backend
 
 ```python
@@ -228,6 +278,58 @@ await ws_manager.send_to_user(user_id, WSMessage(type="some.event", data={...}))
 # Broadcast to all connected clients
 await ws_manager.broadcast(WSMessage(type="system.notification", data={...}))
 ```
+
+## Execution Engine
+
+The execution engine runs graph workflows server-side with event-driven status updates.
+
+### Architecture
+
+```
+Frontend → WS: execution.start → ExecutionManager.run() → asyncio.create_task
+                                    |
+                                    runner.py:
+                                      topo sort → group by levels → asyncio.gather per level
+                                      emit(NODE_PENDING/RUNNING/COMPLETED/FAILED) via EventBus
+                                    |
+                                  handlers.py (@subscribe):
+                                    on_node_* → ws_manager.send_to_user()
+                                    |
+Frontend ← WS: execution.node.* ← Server
+```
+
+**Key principle**: `runner.py` never imports WebSocket. It only emits domain events. Handlers bridge to WS.
+
+### Features
+
+- **Parallel execution** — independent branches run concurrently via topological level grouping
+- **Error propagation** — failed node → all downstream nodes skipped
+- **Partial re-execution** — send `trigger_node_id` + `cached_outputs` to re-run from a specific node
+- **Model resolution** — node override → node-type default → flow-level provider
+
+### Registered Executors (9)
+
+| Executor | Category | Makes API Call |
+|----------|----------|----------------|
+| `consistentCharacter` | Data Source | No |
+| `sceneBuilder` | Data Source | No |
+| `initialPrompt` | Text Processing | Yes (if adapters) |
+| `promptEnhancer` | Text Processing | Yes |
+| `translator` | Text Processing | Yes |
+| `storyTeller` | Text Processing | Yes |
+| `grammarFix` | Text Processing | Yes |
+| `compressor` | Text Processing | Yes (if >2500 chars) |
+| `textOutput` | Output | No |
+
+### Text Providers
+
+| Provider | SDK | Base URL |
+|----------|-----|----------|
+| Mistral | AsyncOpenAI | `https://api.mistral.ai/v1` |
+| GLM | AsyncOpenAI | `https://api.z.ai/api/coding/paas/v4` |
+| OpenRouter | AsyncOpenAI | `https://openrouter.ai/api/v1` |
+| HuggingFace | AsyncOpenAI | `https://router.huggingface.co/v1` |
+| Claude | AsyncAnthropic | Direct API |
 
 ## API Endpoints
 
@@ -245,6 +347,7 @@ await ws_manager.broadcast(WSMessage(type="system.notification", data={...}))
 | `POST`   | `/api/v1/projects/select`        | No       | Get projects by user_id                      |
 | `GET`    | `/api/v1/projects/{id}`          | No       | Get project by ID                            |
 | `DELETE` | `/api/v1/projects/{id}`          | No       | Delete project                               |
+| `POST`   | `/api/v1/execution/run`          | Yes      | Trigger graph execution → returns run_id     |
 | `WS`     | `/api/v1/ws?token=<JWT>`         | Yes      | WebSocket global tunnel                      |
 
 ## Authentication
@@ -264,4 +367,6 @@ JWT-based with refresh tokens:
 - **bcrypt** - Password hashing
 - **python-jose[cryptography]** - JWT tokens
 - **python-dotenv** - Environment variable loading
+- **openai** - AsyncOpenAI client for Mistral, GLM, OpenRouter, HuggingFace
+- **anthropic** - AsyncAnthropic client for Claude
 - **google-adk** - Google ADK (reserved for future use)

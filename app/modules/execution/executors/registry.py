@@ -7,6 +7,8 @@ from app.modules.execution.executors.data_sources import (
     consistent_character,
     scene_builder,
 )
+from app.modules.execution.executors.image_description import image_describer
+from app.modules.execution.executors.image_generation import image_generator
 from app.modules.execution.executors.output import text_output
 from app.modules.execution.executors.text_processing import (
     compressor,
@@ -30,6 +32,9 @@ EXECUTORS: dict[str, ExecutorFn] = {
     "compressor": compressor,
     # Output
     "textOutput": text_output,
+    # Image
+    "imageDescriber": image_describer,
+    "imageGenerator": image_generator,
 }
 
 
