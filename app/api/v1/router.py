@@ -1,9 +1,10 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import users, projects, auth
+from app.api.v1.endpoints import users, projects, auth, backoffice_auth
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth.router)
+router.include_router(backoffice_auth.router)
 router.include_router(users.router)
 router.include_router(projects.router)
 

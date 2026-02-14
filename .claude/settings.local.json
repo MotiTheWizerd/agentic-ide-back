@@ -7,7 +7,10 @@
       "Bash(cmd /c \"poetry --version\")",
       "Bash(cmd /c:*)",
       "Bash(powershell -Command:*)",
-      "Bash(poetry run alembic revision:*)"
+      "Bash(poetry run alembic revision:*)",
+      "Bash(python -m alembic revision:*)",
+      "Bash(python -m alembic upgrade:*)",
+      "Bash(python -m scripts.seed_components:*)"
     ]
   }
 }

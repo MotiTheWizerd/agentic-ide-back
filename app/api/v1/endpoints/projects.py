@@ -1,9 +1,12 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db.dependency import get_db
 from app.models.project import Project
-from app.api.v1.schemas.project import ProjectCreate, ProjectResponse
+from app.api.v1.schemas.project import ProjectCreate, ProjectResponse, ProjectSelectByUser
 from app.modules.projects.dependency import get_project_manager
 from app.modules.projects.manager import ProjectManager
 
@@ -25,6 +28,12 @@ async def create_project(
     await db.refresh(project)
     await manager.create(body.project_name, body.user_id)
     return project
+
+
+@router.post("/select", response_model=List[ProjectResponse])
+async def get_projects_by_user(body: ProjectSelectByUser, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Project).where(Project.user_id == body.user_id))
+    return result.scalars().all()
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

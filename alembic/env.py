@@ -9,7 +9,11 @@ from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.db import Base
-from app.models import User, Project  # noqa: F401 — ensure models are registered
+from app.models import (  # noqa: F401 — ensure models are registered
+    User, Project, BackofficeUser, AgenticComponent,
+    ComponentField, ComponentPort, ComponentApiConfig, ComponentOutputSchema,
+    Flow, ConsistentCharacter,
+)
 
 config = context.config
 if config.config_file_name is not None:

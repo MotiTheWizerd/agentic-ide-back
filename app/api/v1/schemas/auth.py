@@ -4,7 +4,7 @@ from app.api.v1.schemas.user import UserResponse
 
 
 class LoginRequest(BaseModel):
-    email: str
+    identifier: str  # email or username
     password: str
 
 

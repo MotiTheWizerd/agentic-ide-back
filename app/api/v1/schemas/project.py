@@ -8,6 +8,10 @@ class ProjectCreate(BaseModel):
     user_id: int
 
 
+class ProjectSelectByUser(BaseModel):
+    user_id: int
+
+
 class ProjectResponse(BaseModel):
     id: int
     project_name: str
